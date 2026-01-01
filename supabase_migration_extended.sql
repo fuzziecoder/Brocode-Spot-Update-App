@@ -102,7 +102,37 @@ CREATE POLICY "Users can create cigarettes" ON cigarettes FOR INSERT WITH CHECK 
 CREATE POLICY "Users can delete cigarettes" ON cigarettes FOR DELETE USING (true);
 
 -- ============================================================================
--- 5. FUNCTION TO UPDATE MISSION_COUNT WHEN ATTENDANCE IS CONFIRMED
+-- 5. CREATE NOTIFICATIONS TABLE
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  read BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS notifications_user_id_idx ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS notifications_read_idx ON notifications(read);
+CREATE INDEX IF NOT EXISTS notifications_created_at_idx ON notifications(created_at DESC);
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+-- Drop all possible notifications policies
+DO $$ 
+BEGIN
+  DROP POLICY IF EXISTS "Users can read own notifications" ON notifications;
+  DROP POLICY IF EXISTS "Users can update own notifications" ON notifications;
+  DROP POLICY IF EXISTS "System can create notifications" ON notifications;
+END $$;
+
+CREATE POLICY "Users can read own notifications" ON notifications FOR SELECT USING (true);
+CREATE POLICY "Users can update own notifications" ON notifications FOR UPDATE USING (true);
+CREATE POLICY "System can create notifications" ON notifications FOR INSERT WITH CHECK (true);
+
+-- ============================================================================
+-- 6. FUNCTION TO UPDATE MISSION_COUNT WHEN ATTENDANCE IS CONFIRMED
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION update_mission_count_on_attendance()

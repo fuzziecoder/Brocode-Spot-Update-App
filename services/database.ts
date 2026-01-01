@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Spot, Invitation, Payment, InvitationStatus, PaymentStatus, UserProfile, Drink, Attendance, Cigarette } from '../types';
+import { Spot, Invitation, Payment, InvitationStatus, PaymentStatus, UserProfile, Drink, Attendance, Cigarette, Notification } from '../types';
 
 /* -------------------------------------------------------------------------- */
 /* SPOTS */
@@ -722,6 +722,141 @@ export const cigaretteService = {
       console.error('Error deleting cigarette:', error);
       throw error;
     }
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* NOTIFICATIONS */
+/* -------------------------------------------------------------------------- */
+
+export const notificationService = {
+  // Get notifications for a user
+  async getNotifications(userId: string): Promise<Notification[]> {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching notifications:', error);
+      throw error;
+    }
+
+    return data.map((notif: any) => ({
+      id: notif.id,
+      title: notif.title,
+      message: notif.message,
+      timestamp: notif.created_at,
+      read: notif.read,
+    }));
+  },
+
+  // Create notification for a user
+  async createNotification(notificationData: {
+    user_id: string;
+    title: string;
+    message: string;
+  }): Promise<Notification> {
+    const { data, error } = await supabase
+      .from('notifications')
+      .insert({
+        user_id: notificationData.user_id,
+        title: notificationData.title,
+        message: notificationData.message,
+        read: false,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating notification:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      title: data.title,
+      message: data.message,
+      timestamp: data.created_at,
+      read: data.read,
+    };
+  },
+
+  // Create notifications for all users
+  async createNotificationForAllUsers(title: string, message: string): Promise<void> {
+    try {
+      // Get all users
+      const { data: allUsers, error: usersError } = await supabase
+        .from('profiles')
+        .select('id');
+
+      if (usersError || !allUsers || allUsers.length === 0) {
+        console.error('Error fetching users for notifications:', usersError);
+        return;
+      }
+
+      // Create notifications for all users
+      const notifications = allUsers.map((user) => ({
+        user_id: user.id,
+        title,
+        message,
+        read: false,
+      }));
+
+      const { error: insertError } = await supabase
+        .from('notifications')
+        .insert(notifications);
+
+      if (insertError) {
+        console.error('Error creating notifications for all users:', insertError);
+      }
+    } catch (error) {
+      console.error('Error in createNotificationForAllUsers:', error);
+    }
+  },
+
+  // Mark notification as read
+  async markAsRead(notificationId: string): Promise<void> {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('id', notificationId);
+
+    if (error) {
+      console.error('Error marking notification as read:', error);
+      throw error;
+    }
+  },
+
+  // Mark all notifications as read for a user
+  async markAllAsRead(userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', userId)
+      .eq('read', false);
+
+    if (error) {
+      console.error('Error marking all notifications as read:', error);
+      throw error;
+    }
+  },
+
+  // Subscribe to real-time notification updates
+  subscribeToNotifications(userId: string, callback: (payload: any) => void) {
+    return supabase
+      .channel(`notifications-${userId}`)
+      .on('postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        callback
+      )
+      .subscribe();
   },
 };
 

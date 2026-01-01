@@ -169,6 +169,103 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   };
 
   /* ------------------------------------------------------------------------ */
+  /* Helper function to get UUID from user ID */
+  /* ------------------------------------------------------------------------ */
+
+  const getUserIdAsUUID = async (profileId: string): Promise<string> => {
+    if (!profile) {
+      throw new Error('No user profile available');
+    }
+
+    // If it's already a UUID, return it
+    if (profileId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      return profileId;
+    }
+
+    // Otherwise, look it up in the database
+    const cleanPhone = profile.phone ? profile.phone.replace(/\D/g, '') : '';
+    
+    // Try to find user by phone, email, or username
+    let dbProfile = null;
+    
+    if (cleanPhone) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('phone', cleanPhone)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+    
+    if (!dbProfile && profile.email) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', profile.email)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+    
+    if (!dbProfile && profile.username) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', profile.username)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+
+    // If found, return the UUID
+    if (dbProfile) {
+      return dbProfile.id;
+    }
+
+    // If not found, try to create the user profile in the database
+    try {
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert({
+          name: profile.name,
+          username: profile.username,
+          phone: cleanPhone || null,
+          email: profile.email || null,
+          password: profile.password || '',
+          role: profile.role || 'user',
+          profile_pic_url: profile.profile_pic_url || 'https://api.dicebear.com/7.x/thumbs/svg?seed=default',
+          location: profile.location || 'Broville',
+          is_verified: profile.isVerified || true,
+        })
+        .select('id')
+        .single();
+
+      if (createError) {
+        // If creation fails (e.g., username already exists), try one more lookup
+        const { data: finalLookup } = await supabase
+          .from('profiles')
+          .select('id')
+          .or(`phone.eq.${cleanPhone},email.eq.${profile.email || ''},username.eq.${profile.username}`)
+          .maybeSingle();
+        
+        if (finalLookup) {
+          return finalLookup.id;
+        }
+        
+        throw new Error(`Unable to create or find user profile: ${createError.message}`);
+      }
+
+      return newProfile.id;
+    } catch (createErr: any) {
+      throw new Error(`User profile not found in database and could not be created. Please ensure you are logged in with a valid account. Error: ${createErr.message}`);
+    }
+  };
+
+  /* ------------------------------------------------------------------------ */
   /* Send message */
   /* ------------------------------------------------------------------------ */
 
@@ -176,13 +273,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     content_text?: string | null;
     content_image_urls?: string[];
   }) => {
-    if (!user) throw new Error("User not found");
+    if (!user || !profile) throw new Error("User not found");
 
     try {
+      // Get UUID for user ID
+      const userId = await getUserIdAsUUID(user.id);
+
       const { data, error } = await supabase
         .from('chat_messages')
         .insert({
-          user_id: user.id,
+          user_id: userId,
           content_text: messageData.content_text || null,
           content_image_urls: messageData.content_image_urls || null,
           reactions: {},
@@ -230,14 +330,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   /* ------------------------------------------------------------------------ */
 
   const deleteMessage = async (messageId: string) => {
-    if (!user) return;
+    if (!user || !profile) return;
 
     try {
+      // Get UUID for user ID
+      const userId = await getUserIdAsUUID(user.id);
+
       const { error } = await supabase
         .from('chat_messages')
         .delete()
         .eq('id', messageId)
-        .eq('user_id', user.id); // Only allow deleting own messages
+        .eq('user_id', userId); // Only allow deleting own messages
 
       if (error) throw error;
 
@@ -258,25 +361,42 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   /* ------------------------------------------------------------------------ */
 
   const addReaction = async (messageId: string, emoji: string) => {
-    if (!user) return;
+    if (!user || !profile) return;
 
     try {
+      // Get UUID for user ID
+      const userId = await getUserIdAsUUID(user.id);
+
+      // Get current message to update reactions
+      const currentMessage = messages.find(m => m.id === messageId);
+      if (!currentMessage) return;
+
+      const reactions = { ...(currentMessage.reactions || {}) };
+      const users = reactions[emoji] ? [...reactions[emoji]] : [];
+
+      const index = users.indexOf(userId);
+
+      if (index > -1) {
+        // Remove reaction
+        users.splice(index, 1);
+        users.length ? (reactions[emoji] = users) : delete reactions[emoji];
+      } else {
+        // Add reaction
+        reactions[emoji] = [...users, userId];
+      }
+
+      // Update in database
+      const { error } = await supabase
+        .from('chat_messages')
+        .update({ reactions })
+        .eq('id', messageId);
+
+      if (error) throw error;
+
+      // Update local state
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== messageId) return msg;
-
-          const reactions = { ...(msg.reactions || {}) };
-          const users = reactions[emoji] ? [...reactions[emoji]] : [];
-
-          const index = users.indexOf(user.id);
-
-          if (index > -1) {
-            users.splice(index, 1);
-            users.length ? (reactions[emoji] = users) : delete reactions[emoji];
-          } else {
-            reactions[emoji] = [...users, user.id];
-          }
-
           return { ...msg, reactions };
         })
       );

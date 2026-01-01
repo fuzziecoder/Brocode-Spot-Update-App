@@ -106,6 +106,101 @@ const DrinksPage: React.FC = () => {
     }
   }, [fetchData, spot?.id, isPaid]);
 
+  // Helper function to get UUID from profile ID
+  const getUserIdAsUUID = async (profileId: string): Promise<string> => {
+    if (!profile) {
+      throw new Error('No user profile available');
+    }
+
+    // If it's already a UUID, return it
+    if (profileId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      return profileId;
+    }
+
+    // Otherwise, look it up in the database
+    const cleanPhone = profile.phone ? profile.phone.replace(/\D/g, '') : '';
+    
+    // Try to find user by phone, email, or username
+    let dbProfile = null;
+    
+    if (cleanPhone) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('phone', cleanPhone)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+    
+    if (!dbProfile && profile.email) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', profile.email)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+    
+    if (!dbProfile && profile.username) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', profile.username)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+
+    // If found, return the UUID
+    if (dbProfile) {
+      return dbProfile.id;
+    }
+
+    // If not found, try to create the user profile in the database
+    try {
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert({
+          name: profile.name,
+          username: profile.username,
+          phone: cleanPhone || null,
+          email: profile.email || null,
+          password: profile.password || '',
+          role: profile.role || 'user',
+          profile_pic_url: profile.profile_pic_url || 'https://api.dicebear.com/7.x/thumbs/svg?seed=default',
+          location: profile.location || 'Broville',
+          is_verified: profile.isVerified || true,
+        })
+        .select('id')
+        .single();
+
+      if (createError) {
+        // If creation fails (e.g., username already exists), try one more lookup
+        const { data: finalLookup } = await supabase
+          .from('profiles')
+          .select('id')
+          .or(`phone.eq.${cleanPhone},email.eq.${profile.email || ''},username.eq.${profile.username}`)
+          .maybeSingle();
+        
+        if (finalLookup) {
+          return finalLookup.id;
+        }
+        
+        throw new Error(`Unable to create or find user profile: ${createError.message}`);
+      }
+
+      return newProfile.id;
+    } catch (createErr: any) {
+      // Final fallback: if we still can't create/find, throw a helpful error
+      throw new Error(`User profile not found in database and could not be created. Please ensure you are logged in with a valid account. Error: ${createErr.message}`);
+    }
+  };
+
   const handleDrinkImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -137,11 +232,12 @@ const DrinksPage: React.FC = () => {
     if (!spot || !profile || !newDrinkName.trim()) return;
 
     try {
+      const userId = await getUserIdAsUUID(profile.id);
       await drinkService.createDrink({
         spot_id: spot.id,
         name: newDrinkName.trim(),
         image_url: newDrinkImage || undefined,
-        suggested_by: profile.id,
+        suggested_by: userId,
       });
       setNewDrinkName("");
       setNewDrinkImage("");
@@ -158,10 +254,11 @@ const DrinksPage: React.FC = () => {
     if (!spot || !profile || !newCigaretteImage) return;
 
     try {
+      const userId = await getUserIdAsUUID(profile.id);
       await cigaretteService.createCigarette({
         spot_id: spot.id,
         image_url: newCigaretteImage,
-        added_by: profile.id,
+        added_by: userId,
       });
       setNewCigaretteImage(null);
       setNewCigaretteImagePreview(null);

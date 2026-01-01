@@ -16,7 +16,7 @@ import Modal from "../components/common/Modal";
 import Input from "../components/common/Input";
 import GlowButton from "../components/common/GlowButton";
 import Textarea from "../components/common/Textarea";
-import { spotService, invitationService, paymentService } from "../services/database";
+import { spotService, invitationService, paymentService, notificationService } from "../services/database";
 import { supabase } from "../services/supabase";
 import { checkDatabaseSetup, getSetupInstructions } from "../services/dbCheck";
 import { useNotifications } from "../contexts/NotificationsContext";
@@ -112,6 +112,12 @@ const HomePage: React.FC = () => {
         if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
           fetchData();
           if (payload.eventType === 'INSERT') {
+            // Notify all users in database
+            notificationService.createNotificationForAllUsers(
+              "New Spot Created!", 
+              `A new spot has been created at ${payload.new.location}`
+            ).catch(err => console.error('Error notifying all users:', err));
+            // Also notify current user locally
             notify("New Spot Created!", `A new spot has been created at ${payload.new.location}`);
           }
         }
@@ -129,6 +135,12 @@ const HomePage: React.FC = () => {
               pending: 'is on the waitlist',
               declined: 'declined the invitation'
             };
+            // Notify all users about RSVP updates
+            notificationService.createNotificationForAllUsers(
+              "RSVP Updated", 
+              `Someone ${statusMessages[payload.new.status] || 'updated their RSVP'}`
+            ).catch(err => console.error('Error notifying all users:', err));
+            // Also notify current user locally
             notify("RSVP Updated", `Someone ${statusMessages[payload.new.status] || 'updated their RSVP'}`);
           }
         }
@@ -341,6 +353,11 @@ const HomePage: React.FC = () => {
       });
 
       // Notify all users about the new spot
+      await notificationService.createNotificationForAllUsers(
+        "New Spot Created!", 
+        `A new spot has been created at ${newSpotData.location} on ${new Date(newSpotData.date).toLocaleDateString()}`
+      );
+      // Also notify current user locally
       notify("New Spot Created!", `A new spot has been created at ${newSpotData.location} on ${new Date(newSpotData.date).toLocaleDateString()}`);
 
       setCreateSpotModalOpen(false);
@@ -370,6 +387,104 @@ const HomePage: React.FC = () => {
 
   /* ----------------------------- RSVP ----------------------------- */
 
+  // Helper function to get UUID from profile ID
+  const getUserIdAsUUID = async (profileId: string): Promise<string> => {
+    if (!profile) {
+      throw new Error('No user profile available');
+    }
+
+    // If it's already a UUID, return it
+    if (profileId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      return profileId;
+    }
+
+    // Otherwise, look it up in the database
+    const cleanPhone = profile.phone ? profile.phone.replace(/\D/g, '') : '';
+    
+    // Try to find user by phone, email, or username
+    let dbProfile = null;
+    let lookupError = null;
+    
+    if (cleanPhone) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('phone', cleanPhone)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      } else {
+        lookupError = error;
+      }
+    }
+    
+    if (!dbProfile && profile.email) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', profile.email)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+    
+    if (!dbProfile && profile.username) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', profile.username)
+        .maybeSingle();
+      if (!error && data) {
+        dbProfile = data;
+      }
+    }
+
+    // If found, return the UUID
+    if (dbProfile) {
+      return dbProfile.id;
+    }
+
+    // If not found, try to create the user profile in the database
+    try {
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert({
+          name: profile.name,
+          username: profile.username,
+          phone: cleanPhone || null,
+          email: profile.email || null,
+          password: profile.password || '',
+          role: profile.role || 'user',
+          profile_pic_url: profile.profile_pic_url || 'https://api.dicebear.com/7.x/thumbs/svg?seed=default',
+          location: profile.location || 'Broville',
+          is_verified: profile.isVerified || true,
+        })
+        .select('id')
+        .single();
+
+      if (createError) {
+        // If creation fails (e.g., username already exists), try one more lookup
+        const { data: finalLookup } = await supabase
+          .from('profiles')
+          .select('id')
+          .or(`phone.eq.${cleanPhone},email.eq.${profile.email || ''},username.eq.${profile.username}`)
+          .maybeSingle();
+        
+        if (finalLookup) {
+          return finalLookup.id;
+        }
+        
+        throw new Error(`Unable to create or find user profile: ${createError.message}`);
+      }
+
+      return newProfile.id;
+    } catch (createErr: any) {
+      // Final fallback: if we still can't create/find, throw a helpful error
+      throw new Error(`User profile not found in database and could not be created. Please ensure you are logged in with a valid account. Error: ${createErr.message}`);
+    }
+  };
+
   const handleRSVP = async (
     invitationId: string,
     status: InvitationStatus
@@ -382,9 +497,12 @@ const HomePage: React.FC = () => {
       // Create or update payment when user confirms
       if (status === InvitationStatus.CONFIRMED) {
         try {
+          // Get UUID for user ID
+          const userId = await getUserIdAsUUID(profile.id);
+          
           await paymentService.upsertPayment({
             spot_id: spot.id,
-            user_id: profile.id,
+            user_id: userId,
             status: PaymentStatus.NOT_PAID,
           });
         } catch (paymentError) {
@@ -406,9 +524,12 @@ const HomePage: React.FC = () => {
     if (!profile || !spot) return;
 
     try {
+      // Get UUID for user ID
+      const userId = await getUserIdAsUUID(profile.id);
+
       await invitationService.upsertInvitation({
         spot_id: spot.id,
-        user_id: profile.id,
+        user_id: userId,
         status,
       });
       
@@ -417,7 +538,7 @@ const HomePage: React.FC = () => {
         try {
           await paymentService.upsertPayment({
             spot_id: spot.id,
-            user_id: profile.id,
+            user_id: userId,
             status: PaymentStatus.NOT_PAID,
           });
         } catch (paymentError) {
@@ -463,6 +584,7 @@ const HomePage: React.FC = () => {
       setIsEditSpotModalOpen(false);
       setEditingSpot(null);
       await fetchData();
+      await notificationService.createNotificationForAllUsers("Spot Updated", "Spot details have been updated successfully");
       notify("Spot Updated", "Spot details have been updated successfully");
     } catch (error: any) {
       alert(`Failed to update spot: ${error.message || 'Please try again.'}`);
@@ -474,6 +596,7 @@ const HomePage: React.FC = () => {
     try {
       await spotService.deleteSpot(spotId);
       await fetchData();
+      await notificationService.createNotificationForAllUsers("Spot Deleted", "Spot has been deleted successfully");
       notify("Spot Deleted", "Spot has been deleted successfully");
     } catch (error: any) {
       alert(`Failed to delete spot: ${error.message || 'Please try again.'}`);
