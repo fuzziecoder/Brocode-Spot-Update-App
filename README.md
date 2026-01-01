@@ -1,5 +1,5 @@
 # Try Using The App Vroo...
 
-## Launching Soon 
+## Launched
 
-### Stay Tuned
+### Come on bro let's have fun 
