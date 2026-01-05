@@ -4,16 +4,18 @@ import { useAuth } from '../hooks/useAuth';
 import Modal from '../components/common/Modal';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
-import { Spot, Moment } from '../types';
+import { Spot, Moment, UserProfile } from '../types';
 import { ArrowLeft, MoreHorizontal, Gift, Plus, Image as ImageIcon, X, Trash2, Camera, MapPin } from 'lucide-react';
 import * as ReactRouterDOM from 'react-router-dom';
+const { useNavigate, useParams } = ReactRouterDOM;
 import { differenceInYears, format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import GlowButton from '../components/common/GlowButton';
 import { mockApi, getPlaceholderImage } from '../services/mockApi';
 import Textarea from '../components/common/Textarea';
 import AvatarPicker from '../components/common/AvatarPicker';
-import { profileService } from '../services/database';
+import { profileService, momentService, spotService } from '../services/database';
+import { supabase } from '../services/supabase';
 
 type ProfileFormData = {
     name: string;
@@ -181,10 +183,68 @@ const ProfileForm: React.FC<{ onSave: () => void }> = ({ onSave }) => {
 };
 
 const MomentForm: React.FC<{ onSave: () => void }> = ({ onSave }) => {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
     const [caption, setCaption] = useState('');
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+
+    // Helper function to get UUID from profile ID
+    const getUserIdAsUUID = async (profileId: string): Promise<string> => {
+        if (!profile) {
+            throw new Error('No user profile available');
+        }
+
+        // If it's already a UUID, return it
+        if (profileId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+            return profileId;
+        }
+
+        // Otherwise, look it up in the database
+        const cleanPhone = profile.phone ? profile.phone.replace(/\D/g, '') : '';
+        
+        // Try to find user by phone, email, or username
+        let dbProfile = null;
+        
+        if (cleanPhone) {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('phone', cleanPhone)
+                .maybeSingle();
+            if (!error && data) {
+                dbProfile = data;
+            }
+        }
+        
+        if (!dbProfile && profile.email) {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('email', profile.email)
+                .maybeSingle();
+            if (!error && data) {
+                dbProfile = data;
+            }
+        }
+        
+        if (!dbProfile && profile.username) {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('username', profile.username)
+                .maybeSingle();
+            if (!error && data) {
+                dbProfile = data;
+            }
+        }
+
+        // If found, return the UUID
+        if (dbProfile) {
+            return dbProfile.id;
+        }
+
+        throw new Error('User profile not found in database');
+    };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -200,8 +260,12 @@ const MomentForm: React.FC<{ onSave: () => void }> = ({ onSave }) => {
         if (!imagePreview || !user) return;
         setLoading(true);
         try {
-            await mockApi.createMoment({ user_id: user.id, image_url: imagePreview, caption });
+            const userId = await getUserIdAsUUID(user.id);
+            await momentService.createMoment({ user_id: userId, image_url: imagePreview, caption });
             onSave();
+        } catch (error: any) {
+            console.error('Error creating moment:', error);
+            alert(`Failed to create moment: ${error.message || 'Please try again.'}`);
         } finally {
             setLoading(false);
         }
@@ -230,39 +294,189 @@ const MomentForm: React.FC<{ onSave: () => void }> = ({ onSave }) => {
 };
 
 const ProfilePage: React.FC = () => {
-    const { profile, user } = useAuth();
-    const navigate = ReactRouterDOM.useNavigate();
+    const { profile: currentProfile, user } = useAuth();
+    const navigate = useNavigate();
+    const { userId: viewUserId } = useParams<{ userId?: string }>();
+    const [profile, setProfile] = useState<UserProfile | null>(null);
     const [activeTab, setActiveTab] = useState<'Details' | 'Moments'>('Moments');
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isMomentModalOpen, setIsMomentModalOpen] = useState(false);
     const [trips, setTrips] = useState<Spot[]>([]);
     const [moments, setMoments] = useState<Moment[]>([]);
     const [loading, setLoading] = useState(true);
+    const isViewingOwnProfile = !viewUserId || viewUserId === currentProfile?.id;
+
+    // Helper function to get UUID from profile ID
+    const getUserIdAsUUID = useCallback(async (profileId: string, profileToUse?: UserProfile): Promise<string> => {
+        const profileRef = profileToUse || currentProfile;
+        if (!profileRef) {
+            throw new Error('No user profile available');
+        }
+
+        // If it's already a UUID, return it
+        if (profileId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+            return profileId;
+        }
+
+        // Otherwise, look it up in the database
+        const cleanPhone = profileRef.phone ? profileRef.phone.replace(/\D/g, '') : '';
+        
+        // Try to find user by phone, email, or username
+        let dbProfile = null;
+        
+        if (cleanPhone) {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('phone', cleanPhone)
+                .maybeSingle();
+            if (!error && data) {
+                dbProfile = data;
+            }
+        }
+        
+        if (!dbProfile && profileRef.email) {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('email', profileRef.email)
+                .maybeSingle();
+            if (!error && data) {
+                dbProfile = data;
+            }
+        }
+        
+        if (!dbProfile && profileRef.username) {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('username', profileRef.username)
+                .maybeSingle();
+            if (!error && data) {
+                dbProfile = data;
+            }
+        }
+
+        // If found, return the UUID
+        if (dbProfile) {
+            return dbProfile.id;
+        }
+
+        throw new Error('User profile not found in database');
+    }, [currentProfile]);
+
+    // Fetch profile data
+    useEffect(() => {
+        const fetchProfileData = async () => {
+            if (!currentProfile) {
+                setLoading(false);
+                return;
+            }
+            
+            setLoading(true);
+            try {
+                let targetUserId: string;
+                let targetProfile: UserProfile | null = null;
+
+                if (viewUserId) {
+                    // Viewing another user's profile
+                    targetUserId = viewUserId;
+                    targetProfile = await profileService.getProfile(viewUserId);
+                    if (!targetProfile) {
+                        alert('User not found');
+                        navigate('/dashboard/profile');
+                        setLoading(false);
+                        return;
+                    }
+                } else {
+                    // Viewing own profile - use currentProfile directly
+                    try {
+                        targetUserId = await getUserIdAsUUID(currentProfile.id, currentProfile);
+                    } catch (err) {
+                        // If UUID lookup fails, try to use currentProfile.id directly
+                        targetUserId = currentProfile.id;
+                    }
+                    targetProfile = currentProfile;
+                }
+
+                setProfile(targetProfile);
+
+                // Fetch spots and moments for the target user
+                try {
+                    const [spotsData, momentsData] = await Promise.all([
+                        spotService.getPastSpots().then(spots => spots.filter(s => s.created_by === targetUserId)),
+                        momentService.getMoments(targetUserId),
+                    ]);
+                    setTrips(spotsData || []);
+                    setMoments(momentsData || []);
+                } catch (fetchError) {
+                    console.error('Error fetching spots/moments:', fetchError);
+                    setTrips([]);
+                    setMoments([]);
+                }
+            } catch (error) {
+                console.error('Error fetching profile data:', error);
+                setTrips([]);
+                setMoments([]);
+                // Don't set profile to null if viewing own profile
+                if (!viewUserId && currentProfile) {
+                    setProfile(currentProfile);
+                }
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchProfileData();
+    }, [viewUserId, currentProfile?.id, navigate]);
 
     const fetchData = useCallback(async () => {
-        if (!user) return;
+        if (!profile) return;
         setLoading(true);
-        const [spotsData, momentsData] = await Promise.all([
-            mockApi.getUserSpots(user.id),
-            mockApi.getMoments(user.id),
-        ]);
-        setTrips(spotsData || []);
-        setMoments(momentsData || []);
-        setLoading(false);
-    }, [user]);
+        try {
+            const userId = await getUserIdAsUUID(profile.id);
+            const [spotsData, momentsData] = await Promise.all([
+                spotService.getPastSpots().then(spots => spots.filter(s => s.created_by === userId)),
+                momentService.getMoments(userId),
+            ]);
+            setTrips(spotsData || []);
+            setMoments(momentsData || []);
+        } catch (error) {
+            console.error('Error fetching profile data:', error);
+            setTrips([]);
+            setMoments([]);
+        } finally {
+            setLoading(false);
+        }
+    }, [profile, getUserIdAsUUID]);
 
-    useEffect(() => { fetchData(); }, [fetchData]);
-
-    if (!profile) return null;
+    if (!profile) {
+        return (
+            <div className="max-w-4xl mx-auto pb-32 flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <p className="text-zinc-400">Loading profile...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="max-w-4xl mx-auto pb-32">
             <header className="flex flex-col items-center pt-8 pb-12 relative">
-                <div className="absolute top-0 right-0">
-                    <button onClick={() => setIsEditModalOpen(true)} className="p-3 bg-zinc-900 rounded-2xl border border-white/5 text-zinc-400">
-                        <MoreHorizontal size={20} />
-                    </button>
-                </div>
+                {isViewingOwnProfile && (
+                    <div className="absolute top-0 right-0">
+                        <button onClick={() => setIsEditModalOpen(true)} className="p-3 bg-zinc-900 rounded-2xl border border-white/5 text-zinc-400">
+                            <MoreHorizontal size={20} />
+                        </button>
+                    </div>
+                )}
+                {!isViewingOwnProfile && (
+                    <div className="absolute top-0 left-0">
+                        <button onClick={() => navigate('/dashboard/profile')} className="p-3 bg-zinc-900 rounded-2xl border border-white/5 text-zinc-400">
+                            <ArrowLeft size={20} />
+                        </button>
+                    </div>
+                )}
                 
                 <div className="relative mb-6">
                     <div className="absolute -inset-4 bg-gradient-to-tr from-indigo-500 to-pink-500 rounded-full blur-2xl opacity-20" />
@@ -297,23 +511,27 @@ const ProfilePage: React.FC = () => {
                 <AnimatePresence mode="wait">
                     {activeTab === 'Moments' ? (
                         <motion.div key="moments" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            <button 
-                                onClick={() => setIsMomentModalOpen(true)}
-                                className="aspect-square bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-800 flex flex-col items-center justify-center text-zinc-600 hover:text-indigo-400 hover:border-indigo-500/30 transition-all group"
-                            >
-                                <Plus size={32} className="group-hover:scale-110 transition-transform"/>
-                                <span className="text-[9px] font-black uppercase tracking-widest mt-2">Add Intel</span>
-                            </button>
+                            {isViewingOwnProfile && (
+                                <button 
+                                    onClick={() => setIsMomentModalOpen(true)}
+                                    className="aspect-square bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-800 flex flex-col items-center justify-center text-zinc-600 hover:text-indigo-400 hover:border-indigo-500/30 transition-all group"
+                                >
+                                    <Plus size={32} className="group-hover:scale-110 transition-transform"/>
+                                    <span className="text-[9px] font-black uppercase tracking-widest mt-2">Add Intel</span>
+                                </button>
+                            )}
                             {moments.map(moment => (
                                 <div key={moment.id} className="relative aspect-square rounded-3xl overflow-hidden group border border-white/5">
                                     <img src={moment.image_url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="Moment" />
                                     <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
-                                        <p className="text-xs font-bold line-clamp-2">{moment.caption}</p>
+                                        <p className="text-xs font-bold line-clamp-2">{moment.intel || moment.caption}</p>
                                         <span className="text-[8px] font-black uppercase tracking-widest mt-1 text-zinc-400">{format(new Date(moment.created_at), 'MMM dd')}</span>
                                     </div>
-                                    <button onClick={() => mockApi.deleteMoment(moment.id).then(fetchData)} className="absolute top-3 right-3 p-2 bg-black/50 backdrop-blur-md rounded-xl text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <Trash2 size={14}/>
-                                    </button>
+                                    {isViewingOwnProfile && (
+                                        <button onClick={() => momentService.deleteMoment(moment.id).then(fetchData).catch(err => alert(`Failed to delete: ${err.message}`))} className="absolute top-3 right-3 p-2 bg-black/50 backdrop-blur-md rounded-xl text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Trash2 size={14}/>
+                                        </button>
+                                    )}
                                 </div>
                             ))}
                         </motion.div>
@@ -332,7 +550,7 @@ const ProfilePage: React.FC = () => {
                                     </div>
                                     <div className="flex justify-between items-center py-4">
                                         <span className="text-[10px] font-black text-zinc-500 uppercase">Mission Count</span>
-                                        <span className="text-sm font-bold text-white">{trips.length} Successful Ops</span>
+                                        <span className="text-sm font-bold text-white">{profile.mission_count || 0} Successful Ops</span>
                                     </div>
                                 </div>
                             </div>
@@ -344,9 +562,10 @@ const ProfilePage: React.FC = () => {
             <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="MODIFY OPERATIVE">
                 <ProfileForm onSave={() => { setIsEditModalOpen(false); fetchData(); }} />
             </Modal>
-            <Modal isOpen={isMomentModalOpen} onClose={() => setIsMomentModalOpen(false)} title="BRO-MOMENT">
-                <MomentForm onSave={() => { setIsMomentModalOpen(false); fetchData(); }} />
-            </Modal>
+            {isViewingOwnProfile && (
+                <>
+                </>
+            )}
         </div>
     );
 };

@@ -179,7 +179,10 @@ const ChatPage: React.FC = () => {
                                 className={`flex w-full group ${isMe ? 'justify-end' : 'justify-start'}`}
                             >
                                 <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                                    <div className="w-8 flex-shrink-0 self-end mb-1">
+                                    <div 
+                                      className="w-8 flex-shrink-0 self-end mb-1 cursor-pointer hover:opacity-80 transition-opacity"
+                                      onClick={() => !isMe && (window.location.href = `/dashboard/profile/${msg.user_id}`)}
+                                    >
                                         {showAvatar && (
                                             <img 
                                                 src={msg.profiles.profile_pic_url || "https://api.dicebear.com/7.x/thumbs/svg?seed=default"} 
@@ -191,7 +194,10 @@ const ChatPage: React.FC = () => {
                                     
                                     <div className="relative flex flex-col space-y-1">
                                         {!isMe && showAvatar && (
-                                            <span className="text-[10px] font-black text-zinc-500 uppercase tracking-tighter ml-1">
+                                            <span 
+                                              className="text-[10px] font-black text-zinc-500 uppercase tracking-tighter ml-1 cursor-pointer hover:text-zinc-400 transition-colors"
+                                              onClick={() => window.location.href = `/dashboard/profile/${msg.user_id}`}
+                                            >
                                                 {msg.profiles.name}
                                             </span>
                                         )}

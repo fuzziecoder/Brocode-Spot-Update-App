@@ -242,7 +242,10 @@ const PaymentPage: React.FC = () => {
                     key={payment.id}
                     className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 bg-zinc-800/50 rounded-lg border border-white/5"
                   >
-                    <div className="flex items-center gap-3">
+                    <div 
+                      className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => window.location.href = `/dashboard/profile/${payment.user_id}`}
+                    >
                       <img
                         src={
                           member.profile_pic_url ||

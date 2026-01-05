@@ -710,7 +710,7 @@ const HomePage: React.FC = () => {
                   )}
                   <div className="flex items-center gap-4 text-sm">
                     <span className="text-zinc-400">Budget:</span>
-                    <span className="font-bold text-white">${spot.budget} / person</span>
+                    <span className="font-bold text-white">₹{spot.budget} / person</span>
                   </div>
                 </div>
               </Card>
@@ -814,7 +814,10 @@ const HomePage: React.FC = () => {
                         key={inv.id}
                         className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 bg-zinc-900/50 rounded-lg border border-white/5"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
+                        <div 
+                          className="flex items-center gap-3 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => window.location.href = `/dashboard/profile/${inv.profiles.id}`}
+                        >
                           <img
                             src={inv.profiles.profile_pic_url || "https://api.dicebear.com/7.x/thumbs/svg?seed=default"}
                             alt={inv.profiles.name}

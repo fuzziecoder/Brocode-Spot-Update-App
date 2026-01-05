@@ -60,14 +60,28 @@ export interface Drink {
   votes: number;
   suggested_by: string; // User's ID
   voted_by: string[]; // Array of User IDs
+  price?: number; // Price set by admin
   profiles?: { name: string }; // Joined data for suggester's name
 }
 
 export interface Cigarette {
   id: string; // UUID
   spot_id: string; // UUID
+  name: string;
   image_url: string;
   added_by: string; // User's ID
+  price?: number; // Price set by admin
+  created_at: string; // ISO String
+  profiles?: { name: string; profile_pic_url?: string }; // Joined data for adder's name
+}
+
+export interface Food {
+  id: string; // UUID
+  spot_id: string; // UUID
+  name: string;
+  image_url: string;
+  added_by: string; // User's ID
+  price?: number; // Price set by admin
   created_at: string; // ISO String
   profiles?: { name: string; profile_pic_url?: string }; // Joined data for adder's name
 }
@@ -86,6 +100,33 @@ export interface Payment {
   user_id: string; // UUID
   profiles: UserProfile; // Joined data from profiles table
   status: PaymentStatus;
+  drink_total_amount?: number; // Total amount for selected drinks
+}
+
+export interface DrinkBrand {
+  id: string; // UUID
+  name: string;
+  category: 'beer' | 'whiskey' | 'vodka' | 'rum' | 'wine' | 'cocktail' | 'soft_drink' | 'other';
+  image_url?: string;
+  base_price: number;
+  description?: string;
+  is_available: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserDrinkSelection {
+  id: string; // UUID
+  spot_id: string; // UUID
+  user_id: string; // UUID
+  drink_brand_id: string; // UUID
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  created_at: string;
+  updated_at: string;
+  drink_brand?: DrinkBrand; // Joined data
+  profiles?: UserProfile; // Joined data
 }
 
 export interface Notification {
@@ -101,6 +142,7 @@ export interface Moment {
   user_id: string; // UUID
   image_url: string;
   caption?: string;
+  intel?: string; // Intel information (can be same as caption or separate)
   created_at: string; // ISO String
 }
 

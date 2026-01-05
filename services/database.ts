@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Spot, Invitation, Payment, InvitationStatus, PaymentStatus, UserProfile, Drink, Attendance, Cigarette, Notification } from '../types';
+import { Spot, Invitation, Payment, InvitationStatus, PaymentStatus, UserProfile, Drink, Attendance, Cigarette, Food, Notification, DrinkBrand, UserDrinkSelection } from '../types';
 
 /* -------------------------------------------------------------------------- */
 /* SPOTS */
@@ -495,32 +495,54 @@ export const profileService = {
 export const drinkService = {
   // Get drinks for a spot
   async getDrinks(spotId: string): Promise<Drink[]> {
-    const { data, error } = await supabase
-      .from('drinks')
-      .select(`
-        *,
-        profiles:suggested_by (
-          name
-        )
-      `)
-      .eq('spot_id', spotId)
-      .order('votes', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('drinks')
+        .select(`
+          *,
+          profiles:suggested_by (
+            name
+          )
+        `)
+        .eq('spot_id', spotId)
+        .order('votes', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching drinks:', error);
-      throw error;
+      if (error) {
+        console.error('Error fetching drinks:', error);
+        // If table doesn't exist, return empty array instead of throwing
+        if (error.message?.includes('does not exist') || 
+            error.message?.includes('relation') ||
+            error.code === '42P01') {
+          return [];
+        }
+        throw error;
+      }
+
+      if (!data) {
+        return [];
+      }
+
+      return data.map((drink: any) => ({
+        id: drink.id,
+        spot_id: drink.spot_id,
+        name: drink.name,
+        image_url: drink.image_url || '',
+        votes: drink.votes || 0,
+        suggested_by: drink.suggested_by,
+        voted_by: drink.voted_by || [],
+        price: drink.price || undefined,
+        profiles: drink.profiles || null,
+      }));
+    } catch (err: any) {
+      console.error('Error in getDrinks:', err);
+      // If it's a table not found error, return empty array
+      if (err.message?.includes('does not exist') || 
+          err.message?.includes('relation') ||
+          err.code === '42P01') {
+        return [];
+      }
+      throw err;
     }
-
-    return data.map((drink: any) => ({
-      id: drink.id,
-      spot_id: drink.spot_id,
-      name: drink.name,
-      image_url: drink.image_url || '',
-      votes: drink.votes || 0,
-      suggested_by: drink.suggested_by,
-      voted_by: drink.voted_by || [],
-      profiles: drink.profiles,
-    }));
   },
 
   // Create a drink
@@ -561,6 +583,42 @@ export const drinkService = {
       votes: data.votes || 0,
       suggested_by: data.suggested_by,
       voted_by: data.voted_by || [],
+      profiles: data.profiles,
+    };
+  },
+
+  // Update a drink
+  async updateDrink(drinkId: string, drinkData: {
+    name?: string;
+    image_url?: string;
+    price?: number;
+  }): Promise<Drink> {
+    const { data, error } = await supabase
+      .from('drinks')
+      .update(drinkData)
+      .eq('id', drinkId)
+      .select(`
+        *,
+        profiles:suggested_by (
+          name
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('Error updating drink:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      spot_id: data.spot_id,
+      name: data.name,
+      image_url: data.image_url || '',
+      votes: data.votes || 0,
+      suggested_by: data.suggested_by,
+      voted_by: data.voted_by || [],
+      price: data.price || undefined,
       profiles: data.profiles,
     };
   },
@@ -647,8 +705,66 @@ export const drinkService = {
 export const cigaretteService = {
   // Get cigarettes for a spot
   async getCigarettes(spotId: string): Promise<Cigarette[]> {
+    try {
+      const { data, error } = await supabase
+        .from('cigarettes')
+        .select(`
+          *,
+          profiles:added_by (
+            name,
+            profile_pic_url
+          )
+        `)
+        .eq('spot_id', spotId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching cigarettes:', error);
+        // If table doesn't exist, return empty array instead of throwing
+        if (error.message?.includes('does not exist') || 
+            error.message?.includes('relation') ||
+            error.code === '42P01') {
+          return [];
+        }
+        throw error;
+      }
+
+      if (!data) {
+        return [];
+      }
+
+      return data.map((cig: any) => ({
+        id: cig.id,
+        spot_id: cig.spot_id,
+        name: cig.name || 'Cigarette Pack',
+        image_url: cig.image_url,
+        added_by: cig.added_by,
+        price: cig.price || undefined,
+        created_at: cig.created_at,
+        profiles: cig.profiles || null,
+      }));
+    } catch (err: any) {
+      console.error('Error in getCigarettes:', err);
+      // If it's a table not found error, return empty array
+      if (err.message?.includes('does not exist') || 
+          err.message?.includes('relation') ||
+          err.code === '42P01') {
+        return [];
+      }
+      throw err;
+    }
+  },
+
+  // Update a cigarette
+  async updateCigarette(cigaretteId: string, cigaretteData: {
+    name?: string;
+    image_url?: string;
+    price?: number;
+  }): Promise<Cigarette> {
     const { data, error } = await supabase
       .from('cigarettes')
+      .update(cigaretteData)
+      .eq('id', cigaretteId)
       .select(`
         *,
         profiles:added_by (
@@ -656,27 +772,28 @@ export const cigaretteService = {
           profile_pic_url
         )
       `)
-      .eq('spot_id', spotId)
-      .order('created_at', { ascending: false });
+      .single();
 
     if (error) {
-      console.error('Error fetching cigarettes:', error);
+      console.error('Error updating cigarette:', error);
       throw error;
     }
 
-    return data.map((cig: any) => ({
-      id: cig.id,
-      spot_id: cig.spot_id,
-      image_url: cig.image_url,
-      added_by: cig.added_by,
-      created_at: cig.created_at,
-      profiles: cig.profiles,
-    }));
+    return {
+      id: data.id,
+      spot_id: data.spot_id,
+      name: data.name,
+      image_url: data.image_url,
+      added_by: data.added_by,
+      created_at: data.created_at,
+      profiles: data.profiles,
+    };
   },
 
   // Create a cigarette
   async createCigarette(cigaretteData: {
     spot_id: string;
+    name: string;
     image_url: string;
     added_by: string;
   }): Promise<Cigarette> {
@@ -684,6 +801,7 @@ export const cigaretteService = {
       .from('cigarettes')
       .insert({
         spot_id: cigaretteData.spot_id,
+        name: cigaretteData.name,
         image_url: cigaretteData.image_url,
         added_by: cigaretteData.added_by,
       })
@@ -704,6 +822,7 @@ export const cigaretteService = {
     return {
       id: data.id,
       spot_id: data.spot_id,
+      name: data.name || 'Cigarette Pack',
       image_url: data.image_url,
       added_by: data.added_by,
       created_at: data.created_at,
@@ -720,6 +839,153 @@ export const cigaretteService = {
 
     if (error) {
       console.error('Error deleting cigarette:', error);
+      throw error;
+    }
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* FOOD */
+/* -------------------------------------------------------------------------- */
+
+export const foodService = {
+  // Get foods for a spot
+  async getFoods(spotId: string): Promise<Food[]> {
+    try {
+      const { data, error } = await supabase
+        .from('foods')
+        .select(`
+          *,
+          profiles:added_by (
+            name,
+            profile_pic_url
+          )
+        `)
+        .eq('spot_id', spotId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching foods:', error);
+        // If table doesn't exist, return empty array instead of throwing
+        if (error.message?.includes('does not exist') || 
+            error.message?.includes('relation') ||
+            error.code === '42P01') {
+          return [];
+        }
+        throw error;
+      }
+
+      if (!data) {
+        return [];
+      }
+
+      return data.map((food: any) => ({
+        id: food.id,
+        spot_id: food.spot_id,
+        name: food.name,
+        image_url: food.image_url,
+        added_by: food.added_by,
+        price: food.price || undefined,
+        created_at: food.created_at,
+        profiles: food.profiles || null,
+      }));
+    } catch (err: any) {
+      console.error('Error in getFoods:', err);
+      // If it's a table not found error, return empty array
+      if (err.message?.includes('does not exist') || 
+          err.message?.includes('relation') ||
+          err.code === '42P01') {
+        return [];
+      }
+      throw err;
+    }
+  },
+
+  // Create a food
+  async createFood(foodData: {
+    spot_id: string;
+    name: string;
+    image_url: string;
+    added_by: string;
+  }): Promise<Food> {
+    const { data, error } = await supabase
+      .from('foods')
+      .insert({
+        spot_id: foodData.spot_id,
+        name: foodData.name,
+        image_url: foodData.image_url,
+        added_by: foodData.added_by,
+      })
+      .select(`
+        *,
+        profiles:added_by (
+          name,
+          profile_pic_url
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('Error creating food:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      spot_id: data.spot_id,
+      name: data.name,
+      image_url: data.image_url,
+      added_by: data.added_by,
+      created_at: data.created_at,
+      profiles: data.profiles,
+    };
+  },
+
+  // Update a food
+  async updateFood(foodId: string, foodData: {
+    name?: string;
+    image_url?: string;
+    price?: number;
+  }): Promise<Food> {
+    const { data, error } = await supabase
+      .from('foods')
+      .update(foodData)
+      .eq('id', foodId)
+      .select(`
+        *,
+        profiles:added_by (
+          name,
+          profile_pic_url
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('Error updating food:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      spot_id: data.spot_id,
+      name: data.name,
+      image_url: data.image_url,
+      added_by: data.added_by,
+      price: data.price || undefined,
+      created_at: data.created_at,
+      profiles: data.profiles,
+    };
+  },
+
+  // Delete a food
+  async deleteFood(foodId: string): Promise<void> {
+    const { error } = await supabase
+      .from('foods')
+      .delete()
+      .eq('id', foodId);
+
+    if (error) {
+      console.error('Error deleting food:', error);
       throw error;
     }
   },
@@ -857,6 +1123,349 @@ export const notificationService = {
         callback
       )
       .subscribe();
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* MOMENTS */
+/* -------------------------------------------------------------------------- */
+
+export const momentService = {
+  // Get moments for a user
+  async getMoments(userId: string): Promise<Moment[]> {
+    const { data, error } = await supabase
+      .from('moments')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching moments:', error);
+      throw error;
+    }
+
+    return data.map((moment: any) => ({
+      id: moment.id,
+      user_id: moment.user_id,
+      image_url: moment.image_url,
+      caption: moment.caption || '',
+      intel: moment.intel || moment.caption || '',
+      created_at: moment.created_at,
+    }));
+  },
+
+  // Get all moments (for viewing all users' moments)
+  async getAllMoments(): Promise<Moment[]> {
+    const { data, error } = await supabase
+      .from('moments')
+      .select(`
+        *,
+        profiles:user_id (
+          id,
+          name,
+          username,
+          profile_pic_url
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching all moments:', error);
+      throw error;
+    }
+
+    return data.map((moment: any) => ({
+      id: moment.id,
+      user_id: moment.user_id,
+      image_url: moment.image_url,
+      caption: moment.caption || '',
+      intel: moment.intel || moment.caption || '',
+      created_at: moment.created_at,
+      profiles: moment.profiles,
+    }));
+  },
+
+  // Create a moment
+  async createMoment(momentData: {
+    user_id: string;
+    image_url: string;
+    caption?: string;
+    intel?: string;
+  }): Promise<Moment> {
+    const { data, error } = await supabase
+      .from('moments')
+      .insert({
+        user_id: momentData.user_id,
+        image_url: momentData.image_url,
+        caption: momentData.caption || '',
+        intel: momentData.intel || momentData.caption || '',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating moment:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      user_id: data.user_id,
+      image_url: data.image_url,
+      caption: data.caption || '',
+      intel: data.intel || data.caption || '',
+      created_at: data.created_at,
+    };
+  },
+
+  // Delete a moment
+  async deleteMoment(momentId: string): Promise<void> {
+    const { error } = await supabase
+      .from('moments')
+      .delete()
+      .eq('id', momentId);
+
+    if (error) {
+      console.error('Error deleting moment:', error);
+      throw error;
+    }
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* DRINK BRANDS */
+/* -------------------------------------------------------------------------- */
+
+export const drinkBrandService = {
+  // Get all drink brands
+  async getDrinkBrands(category?: string): Promise<DrinkBrand[]> {
+    let query = supabase
+      .from('drink_brands')
+      .select('*')
+      .eq('is_available', true)
+      .order('category', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (category) {
+      query = query.eq('category', category);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching drink brands:', error);
+      throw error;
+    }
+
+    return data.map((brand: any) => ({
+      id: brand.id,
+      name: brand.name,
+      category: brand.category,
+      image_url: brand.image_url || '',
+      base_price: brand.base_price,
+      description: brand.description || '',
+      is_available: brand.is_available,
+      created_at: brand.created_at,
+      updated_at: brand.updated_at,
+    }));
+  },
+
+  // Get drink brand by ID
+  async getDrinkBrand(brandId: string): Promise<DrinkBrand | null> {
+    const { data, error } = await supabase
+      .from('drink_brands')
+      .select('*')
+      .eq('id', brandId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching drink brand:', error);
+      throw error;
+    }
+
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      name: data.name,
+      category: data.category,
+      image_url: data.image_url || '',
+      base_price: data.base_price,
+      description: data.description || '',
+      is_available: data.is_available,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+    };
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* USER DRINK SELECTIONS */
+/* -------------------------------------------------------------------------- */
+
+export const userDrinkSelectionService = {
+  // Get user's drink selections for a spot
+  async getUserSelections(spotId: string, userId: string): Promise<UserDrinkSelection[]> {
+    const { data, error } = await supabase
+      .from('user_drink_selections')
+      .select(`
+        *,
+        drink_brand:drink_brand_id (
+          id,
+          name,
+          category,
+          image_url,
+          base_price,
+          description
+        )
+      `)
+      .eq('spot_id', spotId)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching user drink selections:', error);
+      throw error;
+    }
+
+    return data.map((selection: any) => ({
+      id: selection.id,
+      spot_id: selection.spot_id,
+      user_id: selection.user_id,
+      drink_brand_id: selection.drink_brand_id,
+      quantity: selection.quantity,
+      unit_price: selection.unit_price,
+      total_price: selection.total_price,
+      created_at: selection.created_at,
+      updated_at: selection.updated_at,
+      drink_brand: selection.drink_brand,
+    }));
+  },
+
+  // Get all selections for a spot (for admin view)
+  async getAllSelections(spotId: string): Promise<UserDrinkSelection[]> {
+    const { data, error } = await supabase
+      .from('user_drink_selections')
+      .select(`
+        *,
+        drink_brand:drink_brand_id (
+          id,
+          name,
+          category,
+          image_url,
+          base_price,
+          description
+        ),
+        profiles:user_id (
+          id,
+          name,
+          username,
+          profile_pic_url
+        )
+      `)
+      .eq('spot_id', spotId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching all drink selections:', error);
+      throw error;
+    }
+
+    return data.map((selection: any) => ({
+      id: selection.id,
+      spot_id: selection.spot_id,
+      user_id: selection.user_id,
+      drink_brand_id: selection.drink_brand_id,
+      quantity: selection.quantity,
+      unit_price: selection.unit_price,
+      total_price: selection.total_price,
+      created_at: selection.created_at,
+      updated_at: selection.updated_at,
+      drink_brand: selection.drink_brand,
+      profiles: selection.profiles,
+    }));
+  },
+
+  // Add or update drink selection
+  async upsertSelection(selectionData: {
+    spot_id: string;
+    user_id: string;
+    drink_brand_id: string;
+    quantity: number;
+    unit_price: number;
+  }): Promise<UserDrinkSelection> {
+    const total_price = selectionData.quantity * selectionData.unit_price;
+
+    const { data, error } = await supabase
+      .from('user_drink_selections')
+      .upsert({
+        spot_id: selectionData.spot_id,
+        user_id: selectionData.user_id,
+        drink_brand_id: selectionData.drink_brand_id,
+        quantity: selectionData.quantity,
+        unit_price: selectionData.unit_price,
+        total_price: total_price,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'spot_id,user_id,drink_brand_id'
+      })
+      .select(`
+        *,
+        drink_brand:drink_brand_id (
+          id,
+          name,
+          category,
+          image_url,
+          base_price,
+          description
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('Error upserting drink selection:', error);
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      spot_id: data.spot_id,
+      user_id: data.user_id,
+      drink_brand_id: data.drink_brand_id,
+      quantity: data.quantity,
+      unit_price: data.unit_price,
+      total_price: data.total_price,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+      drink_brand: data.drink_brand,
+    };
+  },
+
+  // Delete drink selection
+  async deleteSelection(selectionId: string): Promise<void> {
+    const { error } = await supabase
+      .from('user_drink_selections')
+      .delete()
+      .eq('id', selectionId);
+
+    if (error) {
+      console.error('Error deleting drink selection:', error);
+      throw error;
+    }
+  },
+
+  // Delete all selections for a user in a spot
+  async deleteAllUserSelections(spotId: string, userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('user_drink_selections')
+      .delete()
+      .eq('spot_id', spotId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error deleting all user selections:', error);
+      throw error;
+    }
   },
 };
 

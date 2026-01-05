@@ -51,6 +51,7 @@ const App: React.FC = () => {
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="chat" element={<ChatPage />} />
                   <Route path="profile" element={<ProfilePage />} />
+                  <Route path="profile/:userId" element={<ProfilePage />} />
                 </Route>
 
                 <Route path="*" element={<Navigate to="/" />} />

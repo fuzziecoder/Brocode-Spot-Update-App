@@ -203,7 +203,7 @@ const HistoryPage: React.FC = () => {
                                     <p className="text-gray-300">
                                         {new Date(spot.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} at {spot.timing}
                                     </p>
-                                    <p className="text-gray-400 text-sm mt-1">${spot.budget} / person</p>
+                                    <p className="text-gray-400 text-sm mt-1">₹{spot.budget} / person</p>
                                 </div>
                                 {isAdmin && (
                                     <div className="flex gap-2 mt-4 md:mt-0">
