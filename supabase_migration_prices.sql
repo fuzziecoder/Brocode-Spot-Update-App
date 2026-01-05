@@ -1,81 +1,132 @@
--- Migration to add price fields to foods and cigarettes tables
--- Run this SQL in your Supabase SQL Editor
+-- Enable UUID generation (safe if already enabled)
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================================
--- 1. CREATE FOODS TABLE (if it doesn't exist)
+-- 1. FOODS TABLE
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS foods (
+CREATE TABLE IF NOT EXISTS public.foods (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  spot_id UUID NOT NULL REFERENCES spots(id) ON DELETE CASCADE,
+  spot_id UUID NOT NULL REFERENCES public.spots(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  image_url TEXT NOT NULL,
-  added_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  price NUMERIC DEFAULT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  image_url TEXT,
+  added_by UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  price NUMERIC,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS foods_spot_id_idx ON foods(spot_id);
-CREATE INDEX IF NOT EXISTS foods_added_by_idx ON foods(added_by);
-ALTER TABLE foods ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS foods_spot_id_idx ON public.foods(spot_id);
+CREATE INDEX IF NOT EXISTS foods_added_by_idx ON public.foods(added_by);
 
--- Drop existing policies
-DO $$ 
-BEGIN
-  DROP POLICY IF EXISTS "Everyone can read foods" ON foods;
-  DROP POLICY IF EXISTS "Users can create foods" ON foods;
-  DROP POLICY IF EXISTS "Users can update foods" ON foods;
-  DROP POLICY IF EXISTS "Users can delete foods" ON foods;
-  DROP POLICY IF EXISTS "Admins can update food prices" ON foods;
-END $$;
+ALTER TABLE public.foods ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Everyone can read foods" ON foods FOR SELECT USING (true);
-CREATE POLICY "Users can create foods" ON foods FOR INSERT WITH CHECK (true);
-CREATE POLICY "Users can update own foods" ON foods FOR UPDATE USING (added_by = auth.uid()::text OR EXISTS (
-  SELECT 1 FROM profiles WHERE profiles.id::text = auth.uid()::text AND profiles.role = 'admin'
-));
-CREATE POLICY "Users can delete own foods" ON foods FOR DELETE USING (added_by = auth.uid()::text OR EXISTS (
-  SELECT 1 FROM profiles WHERE profiles.id::text = auth.uid()::text AND profiles.role = 'admin'
-));
+-- Drop old policies safely
+DROP POLICY IF EXISTS "foods_read" ON public.foods;
+DROP POLICY IF EXISTS "foods_insert" ON public.foods;
+DROP POLICY IF EXISTS "foods_update" ON public.foods;
+DROP POLICY IF EXISTS "foods_delete" ON public.foods;
+
+-- Read: everyone
+CREATE POLICY "foods_read"
+ON public.foods
+FOR SELECT
+USING (true);
+
+-- Insert: any authenticated user
+CREATE POLICY "foods_insert"
+ON public.foods
+FOR INSERT
+WITH CHECK (auth.uid() IS NOT NULL);
+
+-- Update: owner or admin
+CREATE POLICY "foods_update"
+ON public.foods
+FOR UPDATE
+USING (
+  added_by = auth.uid()
+  OR EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+  )
+);
+
+-- Delete: owner or admin
+CREATE POLICY "foods_delete"
+ON public.foods
+FOR DELETE
+USING (
+  added_by = auth.uid()
+  OR EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+  )
+);
 
 -- ============================================================================
--- 2. ADD PRICE AND NAME FIELDS TO CIGARETTES TABLE
+-- 2. CIGARETTES TABLE UPDATES
 -- ============================================================================
 
-ALTER TABLE cigarettes 
+ALTER TABLE public.cigarettes
 ADD COLUMN IF NOT EXISTS name TEXT,
-ADD COLUMN IF NOT EXISTS price NUMERIC DEFAULT NULL;
+ADD COLUMN IF NOT EXISTS price NUMERIC;
 
--- Update existing cigarettes to have a default name if null
-UPDATE cigarettes SET name = 'Cigarette Pack' WHERE name IS NULL;
+UPDATE public.cigarettes
+SET name = 'Cigarette Pack'
+WHERE name IS NULL;
 
--- Make name NOT NULL for new entries (but allow existing NULLs)
--- We'll handle this in application code
+ALTER TABLE public.cigarettes ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies
-DO $$ 
-BEGIN
-  DROP POLICY IF EXISTS "Everyone can read cigarettes" ON cigarettes;
-  DROP POLICY IF EXISTS "Users can create cigarettes" ON cigarettes;
-  DROP POLICY IF EXISTS "Users can update cigarettes" ON cigarettes;
-  DROP POLICY IF EXISTS "Users can delete cigarettes" ON cigarettes;
-END $$;
+DROP POLICY IF EXISTS "cigarettes_read" ON public.cigarettes;
+DROP POLICY IF EXISTS "cigarettes_insert" ON public.cigarettes;
+DROP POLICY IF EXISTS "cigarettes_update" ON public.cigarettes;
+DROP POLICY IF EXISTS "cigarettes_delete" ON public.cigarettes;
 
-CREATE POLICY "Everyone can read cigarettes" ON cigarettes FOR SELECT USING (true);
-CREATE POLICY "Users can create cigarettes" ON cigarettes FOR INSERT WITH CHECK (true);
-CREATE POLICY "Users can update own cigarettes" ON cigarettes FOR UPDATE USING (added_by = auth.uid()::text OR EXISTS (
-  SELECT 1 FROM profiles WHERE profiles.id::text = auth.uid()::text AND profiles.role = 'admin'
-));
-CREATE POLICY "Users can delete own cigarettes" ON cigarettes FOR DELETE USING (added_by = auth.uid()::text OR EXISTS (
-  SELECT 1 FROM profiles WHERE profiles.id::text = auth.uid()::text AND profiles.role = 'admin'
-));
+CREATE POLICY "cigarettes_read"
+ON public.cigarettes
+FOR SELECT
+USING (true);
+
+CREATE POLICY "cigarettes_insert"
+ON public.cigarettes
+FOR INSERT
+WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE POLICY "cigarettes_update"
+ON public.cigarettes
+FOR UPDATE
+USING (
+  added_by = auth.uid()
+  OR EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+  )
+);
+
+CREATE POLICY "cigarettes_delete"
+ON public.cigarettes
+FOR DELETE
+USING (
+  added_by = auth.uid()
+  OR EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+  )
+);
 
 -- ============================================================================
--- 3. ADD PRICE FIELD TO DRINKS TABLE (for user-suggested drinks)
+-- 3. DRINKS TABLE PRICE FIELD
 -- ============================================================================
 
-ALTER TABLE drinks 
-ADD COLUMN IF NOT EXISTS price NUMERIC DEFAULT NULL;
+ALTER TABLE public.drinks
+ADD COLUMN IF NOT EXISTS price NUMERIC;
 
-SELECT 'Price migration completed successfully! Foods, cigarettes, and drinks now support prices.' as status;
+-- ============================================================================
+-- DONE
+-- ============================================================================
+
+SELECT 'Migration completed successfully. UUID issues fixed.' AS status;
